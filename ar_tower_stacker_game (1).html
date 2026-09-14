@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="th" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0">
+    <title>AR Tower Stacker 3D</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Inter & Kanit -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600;800&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <!-- Three.js 3D Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- GSAP for Smooth UI Animations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <!-- MediaPipe Hands for Hand Tracking Gesture Recognition -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Kanit', 'Inter', sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow: hidden;
+            background-color: #090d16;
+        }
+
+        /* Glassmorphism UI */
+        .glass-panel {
+            background: rgba(18, 25, 41, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .glass-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+
+        .glass-btn:active {
+            transform: scale(0.95);
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        /* Video element for camera feed */
+        #camera-feed {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            display: none;
+        }
+
+        #camera-feed.flipped {
+            transform: scaleX(-1);
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+
+        /* Text stroke for score */
+        .text-shadow-glow {
+            text-shadow: 0 0 15px rgba(59, 130, 246, 0.6), 0 0 30px rgba(147, 51, 234, 0.4);
+        }
+
+        .text-shadow-purple {
+            text-shadow: 0 0 15px rgba(236, 72, 153, 0.6), 0 0 30px rgba(168, 85, 247, 0.4);
+        }
+
+        /* Split Screen Vertical Divider */
+        #versus-divider {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(to bottom, #06b6d4, #a855f7, #ec4899);
+            transform: translateX(-50%);
+            z-index: 15;
+            box-shadow: 0 0 15px rgba(168, 85, 247, 0.8);
+        }
+
+        /* Perfect combo floating animation */
+        @keyframes floatUp {
+            0% { opacity: 0; transform: translate(-50%, 0) scale(0.5); }
+            30% { opacity: 1; transform: translate(-50%, -20px) scale(1.2); }
+            100% { opacity: 0; transform: translate(-50%, -60px) scale(1); }
+        }
+
+        .perfect-text {
+            animation: floatUp 1s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="h-full w-full select-none text-white relative">
+
+    <!-- Background AR Video Stream -->
+    <video id="camera-feed" playsinline autoplay muted></video>
+
+    <!-- 3D Canvas Rendering Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Split Screen Center Divider (Hidden in 1P Mode) -->
+    <div id="versus-divider" class="hidden"></div>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer" class="relative z-10 w-full h-full flex flex-col justify-between p-4 pointer-events-none">
+        
+        <!-- Top Navigation Bar -->
+        <div class="flex justify-between items-start w-full max-w-4xl mx-auto pointer-events-auto">
+            <!-- Brand & High Score -->
+            <div class="glass-panel px-4 py-2 rounded-2xl flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-purple-600 flex items-center justify-center shadow-lg">
+                    <i id="mode-icon" class="fa-solid fa-building text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 id="mode-title-text" class="text-xs text-blue-300 font-semibold tracking-wider uppercase">AR Tower Stack</h1>
+                    <div class="text-sm font-bold flex items-center gap-2">
+                        <span>สูงสุด:</span>
+                        <span id="high-score-display" class="text-yellow-400">0</span>
+                        <span>ชั้น</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls (AR Toggle & Mute & Mode) -->
+            <div class="flex gap-2">
+                <button id="home-btn" class="glass-btn w-11 h-11 rounded-2xl flex items-center justify-center text-slate-300 text-lg shadow-lg hidden" title="กลับหน้าหลัก">
+                    <i class="fa-solid fa-house"></i>
+                </button>
+                <button id="hand-toggle-btn" class="glass-btn px-3 h-11 rounded-2xl flex items-center gap-2 text-emerald-400 text-sm font-semibold shadow-lg border-emerald-500/30">
+                    <i class="fa-solid fa-hand"></i>
+                    <span class="hidden sm:inline">จับท่าทางมือ</span>
+                </button>
+                <button id="ar-toggle-btn" class="glass-btn w-11 h-11 rounded-2xl flex items-center justify-center text-cyan-400 text-lg shadow-lg" title="เปิด/ปิด AR">
+                    <i class="fa-solid fa-camera"></i>
+                </button>
+                <button id="flip-cam-btn" class="glass-btn w-11 h-11 rounded-2xl flex items-center justify-center text-amber-400 text-lg shadow-lg" title="สลับกล้อง หน้า/หลัง">
+                    <i class="fa-solid fa-camera-rotate"></i>
+                </button>
+                <button id="sound-btn" class="glass-btn w-11 h-11 rounded-2xl flex items-center justify-center text-white text-lg shadow-lg">
+                    <i id="sound-icon" class="fa-solid fa-volume-high"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Hand Gesture Status HUD -->
+        <div id="hand-gesture-badge" class="self-center mt-2 glass-panel px-4 py-2 rounded-2xl flex items-center gap-2 border-slate-500/30 bg-slate-900/40 pointer-events-auto transition-all duration-300">
+            <i id="hand-status-icon" class="fa-solid fa-hand-pointer text-slate-400 text-base"></i>
+            <span id="hand-status-text" class="text-xs font-semibold text-slate-200">ระบบจับมือ: ปิดอยู่</span>
+        </div>
+
+        <!-- Center Score Counter (Single Player Mode) -->
+        <div id="in-game-score" class="text-center my-auto opacity-0 transition-opacity duration-300 pointer-events-none">
+            <div id="current-score" class="text-7xl font-extrabold tracking-tight text-white text-shadow-glow">0</div>
+            <div class="text-xs uppercase tracking-widest text-cyan-300 font-semibold mt-1">จำนวนชั้นที่สร้างได้</div>
+            <!-- Perfect Popup Container -->
+            <div id="perfect-popup-container" class="relative w-full h-12 mt-2"></div>
+        </div>
+
+        <!-- Versus 2-Player Split HUD Container (Hidden in 1P Mode) -->
+        <div id="versus-hud" class="hidden absolute inset-x-0 top-20 bottom-16 flex pointer-events-none">
+            <!-- Player 1 Side (Left) -->
+            <div class="w-1/2 h-full flex flex-col justify-between items-center p-4 border-r border-white/10">
+                <div class="glass-panel px-4 py-1.5 rounded-full text-cyan-400 font-bold text-sm border-cyan-500/40">
+                    <i class="fa-solid fa-user mr-1"></i> ผู้เล่น 1 (ซ้าย)
+                </div>
+                <div class="text-center">
+                    <div id="p1-score" class="text-6xl font-black text-cyan-400 text-shadow-glow">0</div>
+                    <div class="text-xs font-bold text-cyan-200 mt-1">ชั้น</div>
+                    <div id="p1-perfect-container" class="relative w-full h-10 mt-1"></div>
+                </div>
+                <div id="p1-status" class="glass-panel px-3 py-1.5 rounded-xl text-xs text-cyan-200 border-cyan-500/30">
+                    แตะฝั่งซ้าย หรือ กด [A] / [Space]
+                </div>
+            </div>
+
+            <!-- Player 2 Side (Right) -->
+            <div class="w-1/2 h-full flex flex-col justify-between items-center p-4">
+                <div class="glass-panel px-4 py-1.5 rounded-full text-pink-400 font-bold text-sm border-pink-500/40">
+                    <i class="fa-solid fa-user-ninja mr-1"></i> ผู้เล่น 2 (ขวา)
+                </div>
+                <div class="text-center">
+                    <div id="p2-score" class="text-6xl font-black text-pink-400 text-shadow-purple">0</div>
+                    <div class="text-xs font-bold text-pink-200 mt-1">ชั้น</div>
+                    <div id="p2-perfect-container" class="relative w-full h-10 mt-1"></div>
+                </div>
+                <div id="p2-status" class="glass-panel px-3 py-1.5 rounded-xl text-xs text-pink-200 border-pink-500/30">
+                    แตะฝั่งขวา หรือ กด [L] / [Enter]
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Touch Zone Prompt -->
+        <div id="tap-prompt" class="text-center pb-8 opacity-0 transition-opacity duration-300 pointer-events-none">
+            <span id="tap-prompt-text" class="glass-panel px-6 py-3 rounded-full text-sm font-medium text-cyan-200 border border-cyan-500/30 animate-pulse">
+                <i class="fa-solid fa-hand-fist mr-2 text-emerald-400"></i> ✊ กำมือ หรือ แตะหน้าจอ เพื่อวางบล็อก
+            </span>
+        </div>
+    </div>
+
+    <!-- Start Menu Overlay -->
+    <div id="start-screen" class="absolute inset-0 z-20 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md">
+        <div class="glass-panel p-8 rounded-3xl max-w-sm w-full text-center border border-white/20 shadow-2xl">
+            <div class="w-20 h-20 bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-xl shadow-cyan-500/20">
+                <i class="fa-solid fa-layer-group text-4xl text-white"></i>
+            </div>
+            <h2 class="text-3xl font-black text-white mb-2">AR TOWER</h2>
+            <p class="text-slate-300 text-sm mb-6 font-light">เกมสร้างตึกซ้อนบล็อกในโลกจริง แข่งเดี่ยวหรือดวล 2 คนได้ทันที!</p>
+
+            <button id="start-btn" class="w-full py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-2xl shadow-lg shadow-cyan-500/30 text-base tracking-wide transition transform active:scale-95 mb-2.5 flex items-center justify-center gap-2">
+                <i class="fa-solid fa-user"></i> เล่นคนเดียว (Single Player)
+            </button>
+
+            <button id="start-2p-btn" class="w-full py-3.5 mb-2.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-2xl shadow-lg shadow-purple-500/30 text-base tracking-wide transition transform active:scale-95 flex items-center justify-center gap-2">
+                <i class="fa-solid fa-user-group"></i> แข่งกัน 2 คน (2P Split Screen)
+            </button>
+
+            <button id="start-hand-btn" class="w-full py-2.5 mb-2 bg-emerald-600/80 hover:bg-emerald-500 text-white font-semibold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20">
+                <i class="fa-solid fa-hand"></i> เปิดเล่นด้วยท่าทางมือ (กำมือ/แบมือ)
+            </button>
+
+            <button id="enable-ar-btn" class="w-full py-2.5 glass-btn text-cyan-300 font-semibold rounded-2xl text-xs flex items-center justify-center gap-2">
+                <i class="fa-solid fa-video"></i> เปิดโหมดกล้อง AR
+            </button>
+            <p id="ar-status-text" class="text-xs text-slate-400 mt-2">โหมด 3D สตูดิโอปกติ</p>
+        </div>
+    </div>
+
+    <!-- Game Over Screen Overlay -->
+    <div id="gameover-screen" class="absolute inset-0 z-20 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md hidden opacity-0 transition-opacity duration-300">
+        <div class="glass-panel p-8 rounded-3xl max-w-sm w-full text-center border border-rose-500/30 shadow-2xl">
+            <div id="gameover-icon-bg" class="w-16 h-16 bg-rose-500/20 border border-rose-500/40 rounded-full mx-auto flex items-center justify-center mb-4 text-rose-400 text-2xl">
+                <i id="gameover-icon" class="fa-solid fa-building-circle-xmark"></i>
+            </div>
+            <h3 id="gameover-title" class="text-2xl font-black text-white mb-1">เกมจบลงแล้ว!</h3>
+            <p id="gameover-subtitle" class="text-slate-400 text-xs mb-6">ตึกของคุณพังทลายลงเนื่องจากวางพลาดขอบ</p>
+
+            <div id="single-result-box" class="bg-slate-900/60 rounded-2xl p-4 mb-6 border border-white/5 flex justify-around">
+                <div>
+                    <div class="text-xs text-slate-400 mb-1">ความสูงที่ทำได้</div>
+                    <div id="final-score" class="text-3xl font-extrabold text-cyan-400">0</div>
+                </div>
+                <div class="w-px bg-white/10"></div>
+                <div>
+                    <div class="text-xs text-slate-400 mb-1">สถิติสูงสุด</div>
+                    <div id="final-highscore" class="text-3xl font-extrabold text-yellow-400">0</div>
+                </div>
+            </div>
+
+            <div id="versus-result-box" class="hidden bg-slate-900/60 rounded-2xl p-4 mb-6 border border-white/5 flex justify-around">
+                <div>
+                    <div class="text-xs text-cyan-400 font-bold mb-1">ผู้เล่น 1</div>
+                    <div id="final-p1-score" class="text-3xl font-extrabold text-cyan-400">0</div>
+                </div>
+                <div class="w-px bg-white/10"></div>
+                <div>
+                    <div class="text-xs text-pink-400 font-bold mb-1">ผู้เล่น 2</div>
+                    <div id="final-p2-score" class="text-3xl font-extrabold text-pink-400">0</div>
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button id="restart-btn" class="flex-1 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold rounded-2xl shadow-lg shadow-cyan-500/30 text-lg tracking-wide transition transform active:scale-95 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-rotate-right"></i> เล่นอีกครั้ง
+                </button>
+                <button id="home-gameover-btn" class="py-4 px-5 glass-btn text-slate-200 hover:text-white font-bold rounded-2xl shadow-lg text-base tracking-wide transition transform active:scale-95 flex items-center justify-center gap-2" title="กลับหน้าหลัก">
+                    <i class="fa-solid fa-house"></i> หน้าหลัก
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio Synthesizer & Game Logic Javascript -->
+    <script>
+        // Web Audio API Audio Synthesizer (No external audio files required)
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playDrop(freq = 300) {
+                if (this.muted || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(freq * 0.5, this.ctx.currentTime + 0.15);
+
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            }
+
+            playPerfect(comboCount) {
+                if (this.muted || !this.ctx) return;
+                // Pentatonic scale note progression based on combo
+                const baseScale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00];
+                const noteIndex = Math.min(comboCount, baseScale.length - 1);
+                const freq = baseScale[noteIndex];
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.4);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.4);
+            }
+
+            playChop() {
+                if (this.muted || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.1);
+
+                gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+
+            playGameOver() {
+                if (this.muted || !this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(200, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(60, this.ctx.currentTime + 0.6);
+
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.6);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.6);
+            }
+        }
+
+        const audio = new SoundFX();
+
+        // Core Game Constants & Variables
+        const BLOCK_HEIGHT = 0.5;
+        const INITIAL_SIZE = 3;
+        const MOVE_SPEED = 0.08;
+
+        let renderer;
+        let isVersusMode = false;
+
+        // Player Data Structure Supporting 1P and 2P
+        class PlayerInstance {
+            constructor(id, isLeftViewport) {
+                this.id = id;
+                this.isLeft = isLeftViewport;
+                this.scene = null;
+                this.camera = null;
+                this.blocks = [];
+                this.fallingPieces = [];
+                this.currentLevel = 0;
+                this.comboCounter = 0;
+                this.activeAxis = 'x';
+                this.activeDirection = 1;
+                this.activeBlock = null;
+                this.isDead = false;
+                this.lastGestureState = 'OPEN';
+                this.gestureCooldown = false;
+            }
+
+            initThreeScene() {
+                this.scene = new THREE.Scene();
+                const aspect = (window.innerWidth / (isVersusMode ? 2 : 1)) / window.innerHeight;
+                const d = 5;
+                this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, -100, 1000);
+                this.camera.position.set(6, 8, 6);
+                this.camera.lookAt(0, 1, 0);
+
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                dirLight.position.set(10, 20, 10);
+                dirLight.castShadow = true;
+                this.scene.add(dirLight);
+
+                // Grid Base
+                const gridColor = this.id === 0 ? 0x00f0ff : 0xec4899;
+                const grid = new THREE.GridHelper(12, 12, gridColor, 0x1e293b);
+                grid.position.y = -0.01;
+                this.scene.add(grid);
+
+                const planeGeo = new THREE.PlaneGeometry(20, 20);
+                const planeMat = new THREE.ShadowMaterial({ opacity: 0.25 });
+                const shadowPlane = new THREE.Mesh(planeGeo, planeMat);
+                shadowPlane.rotation.x = -Math.PI / 2;
+                shadowPlane.receiveShadow = true;
+                this.scene.add(shadowPlane);
+            }
+        }
+
+        let players = [];
+        let gameMode = 'IDLE'; // 'IDLE', 'PLAYING', 'GAMEOVER'
+        let highScore = parseInt(localStorage.getItem('ar_tower_highscore') || '0');
+
+        // Camera Feed AR Control
+        let isARActive = false;
+        let videoStream = null;
+        let currentFacingMode = 'environment'; // 'environment' (หลัง) หรือ 'user' (หน้า)
+
+        // Hand Tracking & Gesture Control Variables
+        let hands = null;
+        let isHandTrackingActive = false;
+        let handProcessingActive = false;
+
+        function initHandTracking() {
+            if (hands) return;
+            try {
+                hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+                hands.setOptions({
+                    maxNumHands: 2, // Support up to 2 hands for 2-Player mode
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+
+                hands.onResults(onHandResults);
+            } catch (e) {
+                console.error("Hand tracking init error:", e);
+            }
+        }
+
+        function onHandResults(results) {
+            const handBadge = document.getElementById('hand-gesture-badge');
+            const handStatusText = document.getElementById('hand-status-text');
+            const handIcon = document.getElementById('hand-status-icon');
+
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                if (handStatusText) handStatusText.innerText = "กำลังค้นหามือ...";
+                if (handIcon) handIcon.className = "fa-solid fa-hand-pointer text-slate-400 text-base";
+                if (handBadge) handBadge.className = "self-center mt-2 glass-panel px-4 py-2 rounded-2xl flex items-center gap-2 border-slate-500/30 bg-slate-900/40 pointer-events-auto transition-all duration-300";
+                return;
+            }
+
+            // Iterate over all detected hands
+            results.multiHandLandmarks.forEach((landmarks) => {
+                const dist3D = (p1, p2) => {
+                    const dx = p1.x - p2.x;
+                    const dy = p1.y - p2.y;
+                    const dz = (p1.z || 0) - (p2.z || 0);
+                    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+                };
+
+                const isCurled = (tip, mcp) => dist3D(landmarks[tip], landmarks[0]) < dist3D(landmarks[mcp], landmarks[0]) * 0.98;
+
+                const indexCurled = isCurled(8, 5);
+                const middleCurled = isCurled(12, 9);
+                const ringCurled = isCurled(16, 13);
+                const pinkyCurled = isCurled(20, 17);
+
+                const curledFingers = (indexCurled ? 1 : 0) + (middleCurled ? 1 : 0) + (ringCurled ? 1 : 0) + (pinkyCurled ? 1 : 0);
+                const isFist = curledFingers >= 3;
+
+                // Determine targeted player: Hand on left side of frame (x > 0.5 in mirrored space) vs right side
+                const wristX = landmarks[0].x;
+                // Note: MediaPipe camera output is mirrored, so wristX > 0.5 is visually Left player (P1), wristX <= 0.5 is Right player (P2)
+                const targetPlayerIndex = (!isVersusMode || wristX > 0.5) ? 0 : 1;
+                const p = players[targetPlayerIndex];
+
+                if (!p) return;
+
+                if (isFist) {
+                    if (p.lastGestureState === 'OPEN' && !p.gestureCooldown) {
+                        p.lastGestureState = 'CLOSED';
+                        p.gestureCooldown = true;
+                        if (gameMode === 'PLAYING' && !p.isDead) {
+                            placeBlock(targetPlayerIndex);
+                        }
+                        setTimeout(() => { p.gestureCooldown = false; }, 400);
+                    }
+                } else {
+                    p.lastGestureState = 'OPEN';
+                }
+            });
+
+            if (handStatusText) {
+                handStatusText.innerText = `ตรวจจับมือแล้ว (${results.multiHandLandmarks.length} มือ)`;
+                if (handIcon) handIcon.className = "fa-solid fa-hand-fist text-emerald-400 text-lg";
+            }
+        }
+
+        async function processHandFrame() {
+            if (!isHandTrackingActive || handProcessingActive) return;
+            const videoEl = document.getElementById('camera-feed');
+            if (videoEl && videoEl.readyState >= 2 && hands) {
+                handProcessingActive = true;
+                try {
+                    await hands.send({ image: videoEl });
+                } catch (e) {
+                    console.error("Frame processing error:", e);
+                }
+                handProcessingActive = false;
+            }
+        }
+
+        async function toggleHandTracking() {
+            initHandTracking();
+            const btn = document.getElementById('hand-toggle-btn');
+            const handBadge = document.getElementById('hand-gesture-badge');
+            const handStatusText = document.getElementById('hand-status-text');
+
+            if (!isHandTrackingActive) {
+                if (!isARActive) {
+                    await toggleARCamera();
+                }
+                isHandTrackingActive = true;
+                btn.classList.add('bg-emerald-500/30', 'border-emerald-400', 'text-emerald-300');
+                if (handStatusText) handStatusText.innerText = "เปิดระบบตรวจจับมือแล้ว";
+            } else {
+                isHandTrackingActive = false;
+                btn.classList.remove('bg-emerald-500/30', 'border-emerald-400', 'text-emerald-300');
+                if (handStatusText) handStatusText.innerText = "ระบบจับมือ: ปิดอยู่";
+            }
+        }
+
+        function getBlockColor(level, playerId = 0) {
+            const baseHue = playerId === 0 ? 180 : 300; // Cyan vs Magenta base
+            const hue = (baseHue + level * 14) % 360;
+            return new THREE.Color(`hsl(${hue}, 85%, 60%)`);
+        }
+
+        function initThreeRenderer() {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = ''; // Clear previous canvas
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function setupPlayers() {
+            players = [];
+            const count = isVersusMode ? 2 : 1;
+            for (let i = 0; i < count; i++) {
+                const p = new PlayerInstance(i, i === 0);
+                p.initThreeScene();
+                players.push(p);
+            }
+        }
+
+        function createBaseBlock(p) {
+            const geometry = new THREE.BoxGeometry(INITIAL_SIZE, BLOCK_HEIGHT, INITIAL_SIZE);
+            const material = new THREE.MeshPhongMaterial({
+                color: getBlockColor(0, p.id),
+                shininess: 30,
+                flatShading: true
+            });
+            const base = new THREE.Mesh(geometry, material);
+            base.position.set(0, BLOCK_HEIGHT / 2, 0);
+            base.castShadow = true;
+            base.receiveShadow = true;
+            p.scene.add(base);
+
+            p.blocks.push({
+                mesh: base,
+                width: INITIAL_SIZE,
+                depth: INITIAL_SIZE,
+                x: 0,
+                z: 0
+            });
+        }
+
+        function spawnNextBlock(p) {
+            p.currentLevel++;
+            p.activeAxis = p.currentLevel % 2 === 1 ? 'x' : 'z';
+            p.activeDirection = 1;
+
+            const prevBlock = p.blocks[p.blocks.length - 1];
+            const width = prevBlock.width;
+            const depth = prevBlock.depth;
+            const yPos = p.currentLevel * BLOCK_HEIGHT + BLOCK_HEIGHT / 2;
+
+            const geometry = new THREE.BoxGeometry(width, BLOCK_HEIGHT, depth);
+            const material = new THREE.MeshPhongMaterial({
+                color: getBlockColor(p.currentLevel, p.id),
+                shininess: 40,
+                flatShading: true
+            });
+
+            p.activeBlock = new THREE.Mesh(geometry, material);
+            p.activeBlock.castShadow = true;
+            p.activeBlock.receiveShadow = true;
+
+            let startX = prevBlock.x;
+            let startZ = prevBlock.z;
+            const spawnDistance = 4.5;
+            if (p.activeAxis === 'x') {
+                startX = -spawnDistance;
+            } else {
+                startZ = -spawnDistance;
+            }
+
+            p.activeBlock.position.set(startX, yPos, startZ);
+            p.scene.add(p.activeBlock);
+
+            // Update UI Score
+            if (!isVersusMode) {
+                document.getElementById('current-score').innerText = p.currentLevel;
+            } else {
+                document.getElementById(p.id === 0 ? 'p1-score' : 'p2-score').innerText = p.currentLevel;
+            }
+        }
+
+        function placeBlock(playerIdx = 0) {
+            const p = players[playerIdx];
+            if (gameMode !== 'PLAYING' || !p || p.isDead || !p.activeBlock) return;
+
+            const prevBlock = p.blocks[p.blocks.length - 1];
+            const currentPos = p.activeBlock.position;
+
+            let delta = 0;
+            let overlap = 0;
+            let prevSize = 0;
+
+            if (p.activeAxis === 'x') {
+                delta = currentPos.x - prevBlock.x;
+                prevSize = prevBlock.width;
+            } else {
+                delta = currentPos.z - prevBlock.z;
+                prevSize = prevBlock.depth;
+            }
+
+            const absDelta = Math.abs(delta);
+            const tolerance = 0.08;
+
+            if (absDelta < tolerance) {
+                // Perfect Drop
+                audio.playPerfect(p.comboCounter);
+                p.comboCounter++;
+
+                if (p.activeAxis === 'x') currentPos.x = prevBlock.x;
+                else currentPos.z = prevBlock.z;
+
+                showPerfectEffect(p.comboCounter, p.id);
+
+                p.blocks.push({
+                    mesh: p.activeBlock,
+                    width: prevBlock.width,
+                    depth: prevBlock.depth,
+                    x: currentPos.x,
+                    z: currentPos.z
+                });
+
+            } else if (absDelta >= prevSize) {
+                // Completely Missed
+                createFallingPiece(
+                    p,
+                    p.activeBlock.position.x,
+                    p.activeBlock.position.y,
+                    p.activeBlock.position.z,
+                    p.activeAxis === 'x' ? prevBlock.width : prevBlock.width,
+                    p.activeAxis === 'z' ? prevBlock.depth : prevBlock.depth,
+                    getBlockColor(p.currentLevel, p.id)
+                );
+                p.scene.remove(p.activeBlock);
+                p.isDead = true;
+                
+                checkVersusEndCondition();
+                return;
+
+            } else {
+                // Slice Block
+                p.comboCounter = 0;
+                audio.playChop();
+
+                overlap = prevSize - absDelta;
+
+                let newWidth = prevBlock.width;
+                let newDepth = prevBlock.depth;
+
+                if (p.activeAxis === 'x') newWidth = overlap;
+                else newDepth = overlap;
+
+                const newX = p.activeAxis === 'x' ? prevBlock.x + delta / 2 : currentPos.x;
+                const newZ = p.activeAxis === 'z' ? prevBlock.z + delta / 2 : currentPos.z;
+
+                p.activeBlock.geometry.dispose();
+                p.activeBlock.geometry = new THREE.BoxGeometry(newWidth, BLOCK_HEIGHT, newDepth);
+                p.activeBlock.position.set(newX, currentPos.y, newZ);
+
+                const fallingSize = absDelta;
+                const fallingSign = delta > 0 ? 1 : -1;
+
+                let fallX = newX;
+                let fallZ = newZ;
+                let fallWidth = newWidth;
+                let fallDepth = newDepth;
+
+                if (p.activeAxis === 'x') {
+                    fallX = newX + (newWidth / 2 + fallingSize / 2) * fallingSign;
+                    fallWidth = fallingSize;
+                } else {
+                    fallZ = newZ + (newDepth / 2 + fallingSize / 2) * fallingSign;
+                    fallDepth = fallingSize;
+                }
+
+                createFallingPiece(p, fallX, currentPos.y, fallZ, fallWidth, fallDepth, getBlockColor(p.currentLevel, p.id));
+
+                p.blocks.push({
+                    mesh: p.activeBlock,
+                    width: newWidth,
+                    depth: newDepth,
+                    x: newX,
+                    z: newZ
+                });
+            }
+
+            animateCameraHeight(p);
+            spawnNextBlock(p);
+        }
+
+        function createFallingPiece(p, x, y, z, w, d, color) {
+            const geometry = new THREE.BoxGeometry(w, BLOCK_HEIGHT, d);
+            const material = new THREE.MeshPhongMaterial({ color: color, flatShading: true });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            p.scene.add(mesh);
+
+            p.fallingPieces.push({
+                mesh: mesh,
+                vy: 0,
+                rotX: (Math.random() - 0.5) * 0.1,
+                rotZ: (Math.random() - 0.5) * 0.1
+            });
+        }
+
+        function updateFallingPieces(p) {
+            for (let i = p.fallingPieces.length - 1; i >= 0; i--) {
+                const piece = p.fallingPieces[i];
+                piece.vy -= 0.015;
+                piece.mesh.position.y += piece.vy;
+                piece.mesh.rotation.x += piece.rotX;
+                piece.mesh.rotation.z += piece.rotZ;
+
+                if (piece.mesh.position.y < -5) {
+                    p.scene.remove(piece.mesh);
+                    piece.mesh.geometry.dispose();
+                    piece.mesh.material.dispose();
+                    p.fallingPieces.splice(i, 1);
+                }
+            }
+        }
+
+        function showPerfectEffect(combo, playerId = 0) {
+            const containerId = !isVersusMode ? 'perfect-popup-container' : (playerId === 0 ? 'p1-perfect-container' : 'p2-perfect-container');
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const popup = document.createElement('div');
+            popup.className = `absolute left-1/2 top-0 transform -translate-x-1/2 ${playerId === 1 ? 'text-pink-300' : 'text-yellow-300'} font-extrabold text-xl tracking-widest perfect-text drop-shadow-md`;
+            popup.innerHTML = `PERFECT! ${combo > 1 ? 'x' + combo : ''}`;
+            container.appendChild(popup);
+
+            setTimeout(() => {
+                if (popup.parentNode) popup.parentNode.removeChild(popup);
+            }, 1000);
+        }
+
+        function animateCameraHeight(p) {
+            const targetY = p.currentLevel * BLOCK_HEIGHT + 8;
+            gsap.to(p.camera.position, {
+                y: targetY,
+                duration: 0.6,
+                ease: 'power2.out'
+            });
+            gsap.to(p.camera.lookAt, {
+                y: p.currentLevel * BLOCK_HEIGHT,
+                duration: 0.6,
+                ease: 'power2.out'
+            });
+        }
+
+        function checkVersusEndCondition() {
+            if (!isVersusMode) {
+                triggerGameOver();
+                return;
+            }
+
+            const p1 = players[0];
+            const p2 = players[1];
+
+            if (p1.isDead && p2.isDead) {
+                triggerGameOver();
+            } else if (p1.isDead && !p2.isDead) {
+                // Give visual indication P1 lost
+                document.getElementById('p1-status').innerText = "💀 พลาดขอบแพ้แล้ว!";
+                document.getElementById('p1-status').className = "glass-panel px-3 py-1.5 rounded-xl text-xs text-rose-400 border-rose-500/50 bg-rose-950/40 animate-pulse";
+            } else if (!p1.isDead && p2.isDead) {
+                document.getElementById('p2-status').innerText = "💀 พลาดขอบแพ้แล้ว!";
+                document.getElementById('p2-status').className = "glass-panel px-3 py-1.5 rounded-xl text-xs text-rose-400 border-rose-500/50 bg-rose-950/40 animate-pulse";
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (gameMode === 'PLAYING') {
+                players.forEach((p) => {
+                    if (!p.isDead && p.activeBlock) {
+                        const speed = MOVE_SPEED + Math.min(p.currentLevel * 0.002, 0.06);
+                        if (p.activeAxis === 'x') {
+                            p.activeBlock.position.x += speed * p.activeDirection;
+                            if (Math.abs(p.activeBlock.position.x) > 4.5) {
+                                p.activeDirection *= -1;
+                            }
+                        } else {
+                            p.activeBlock.position.z += speed * p.activeDirection;
+                            if (Math.abs(p.activeBlock.position.z) > 4.5) {
+                                p.activeDirection *= -1;
+                            }
+                        }
+                    }
+                    updateFallingPieces(p);
+                });
+            }
+
+            if (isHandTrackingActive) {
+                processHandFrame();
+            }
+
+            // Render 3D Scenes into Viewports
+            if (renderer && players.length > 0) {
+                if (!isVersusMode) {
+                    renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+                    renderer.setScissorTest(false);
+                    renderer.render(players[0].scene, players[0].camera);
+                } else {
+                    const w = window.innerWidth / 2;
+                    const h = window.innerHeight;
+                    renderer.setScissorTest(true);
+
+                    // Left Viewport (Player 1)
+                    renderer.setViewport(0, 0, w, h);
+                    renderer.setScissor(0, 0, w, h);
+                    renderer.render(players[0].scene, players[0].camera);
+
+                    // Right Viewport (Player 2)
+                    renderer.setViewport(w, 0, w, h);
+                    renderer.setScissor(w, 0, w, h);
+                    renderer.render(players[1].scene, players[1].camera);
+                }
+            }
+        }
+
+        function startGame(versus = false) {
+            audio.init();
+            isVersusMode = versus;
+
+            setupPlayers();
+
+            gameMode = 'PLAYING';
+
+            // UI Adjustments
+            document.getElementById('start-screen').classList.add('hidden');
+            const goScreen = document.getElementById('gameover-screen');
+            goScreen.classList.add('opacity-0');
+            setTimeout(() => goScreen.classList.add('hidden'), 300);
+
+            const modeIcon = document.getElementById('mode-icon');
+            const modeText = document.getElementById('mode-title-text');
+            const divider = document.getElementById('versus-divider');
+            const singleHud = document.getElementById('in-game-score');
+            const versusHud = document.getElementById('versus-hud');
+
+            if (isVersusMode) {
+                modeIcon.className = "fa-solid fa-user-group text-white text-lg";
+                modeText.innerText = "AR VERSUS (2P)";
+                divider.classList.remove('hidden');
+                singleHud.classList.add('hidden');
+                versusHud.classList.remove('hidden');
+                document.getElementById('p1-score').innerText = '0';
+                document.getElementById('p2-score').innerText = '0';
+                document.getElementById('p1-status').innerText = "แตะฝั่งซ้าย หรือ กด [A] / [Space]";
+                document.getElementById('p1-status').className = "glass-panel px-3 py-1.5 rounded-xl text-xs text-cyan-200 border-cyan-500/30";
+                document.getElementById('p2-status').innerText = "แตะฝั่งขวา หรือ กด [L] / [Enter]";
+                document.getElementById('p2-status').className = "glass-panel px-3 py-1.5 rounded-xl text-xs text-pink-200 border-pink-500/30";
+            } else {
+                modeIcon.className = "fa-solid fa-building text-white text-lg";
+                modeText.innerText = "AR TOWER STACK";
+                divider.classList.add('hidden');
+                singleHud.classList.remove('hidden');
+                singleHud.classList.remove('opacity-0');
+                versusHud.classList.add('hidden');
+                document.getElementById('current-score').innerText = '0';
+            }
+
+            document.getElementById('tap-prompt').classList.remove('opacity-0');
+            document.getElementById('home-btn').classList.remove('hidden');
+
+            players.forEach((p) => {
+                createBaseBlock(p);
+                spawnNextBlock(p);
+            });
+        }
+
+        function returnToHome() {
+            gameMode = 'IDLE';
+            document.getElementById('start-screen').classList.remove('hidden');
+            const goScreen = document.getElementById('gameover-screen');
+            goScreen.classList.add('opacity-0');
+            setTimeout(() => goScreen.classList.add('hidden'), 300);
+
+            document.getElementById('in-game-score').classList.add('opacity-0', 'hidden');
+            document.getElementById('versus-hud').classList.add('hidden');
+            document.getElementById('versus-divider').classList.add('hidden');
+            document.getElementById('tap-prompt').classList.add('opacity-0');
+            document.getElementById('home-btn').classList.add('hidden');
+        }
+
+        function triggerGameOver() {
+            gameMode = 'GAMEOVER';
+            audio.playGameOver();
+
+            const p1Score = players[0] ? players[0].currentLevel : 0;
+            const p2Score = players[1] ? players[1].currentLevel : 0;
+
+            const singleBox = document.getElementById('single-result-box');
+            const versusBox = document.getElementById('versus-result-box');
+            const title = document.getElementById('gameover-title');
+            const subtitle = document.getElementById('gameover-subtitle');
+
+            if (!isVersusMode) {
+                singleBox.classList.remove('hidden');
+                versusBox.classList.add('hidden');
+                title.innerText = "เกมจบลงแล้ว!";
+                subtitle.innerText = "ตึกของคุณพังทลายลงเนื่องจากวางพลาดขอบ";
+
+                if (p1Score > highScore) {
+                    highScore = p1Score;
+                    localStorage.setItem('ar_tower_highscore', highScore.toString());
+                }
+
+                document.getElementById('high-score-display').innerText = highScore;
+                document.getElementById('final-score').innerText = p1Score;
+                document.getElementById('final-highscore').innerText = highScore;
+            } else {
+                singleBox.classList.add('hidden');
+                versusBox.classList.remove('hidden');
+                document.getElementById('final-p1-score').innerText = p1Score;
+                document.getElementById('final-p2-score').innerText = p2Score;
+
+                if (p1Score > p2Score) {
+                    title.innerText = "ผู้เล่น 1 ชนะ!";
+                    subtitle.innerText = `ทำความสูงได้ ${p1Score} ชั้น vs ${p2Score} ชั้น`;
+                } else if (p2Score > p1Score) {
+                    title.innerText = "ผู้เล่น 2 ชนะ!";
+                    subtitle.innerText = `ทำความสูงได้ ${p2Score} ชั้น vs ${p1Score} ชั้น`;
+                } else {
+                    title.innerText = "เสมอกัน!";
+                    subtitle.innerText = `ทั้งสองคนทำได้ ${p1Score} ชั้นเท่ากัน`;
+                }
+            }
+
+            const goScreen = document.getElementById('gameover-screen');
+            goScreen.classList.remove('hidden');
+            setTimeout(() => {
+                goScreen.classList.remove('opacity-0');
+            }, 10);
+        }
+
+        async function startCameraStream() {
+            const videoEl = document.getElementById('camera-feed');
+            const arBtn = document.getElementById('ar-toggle-btn');
+            const statusText = document.getElementById('ar-status-text');
+
+            try {
+                if (videoStream) {
+                    videoStream.getTracks().forEach(track => track.stop());
+                }
+
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode },
+                    audio: false
+                });
+                videoEl.srcObject = videoStream;
+                videoEl.style.display = 'block';
+
+                if (currentFacingMode === 'user') {
+                    videoEl.classList.add('flipped');
+                } else {
+                    videoEl.classList.remove('flipped');
+                }
+
+                isARActive = true;
+
+                if (renderer) renderer.setClearColor(0x000000, 0);
+
+                arBtn.classList.add('bg-cyan-500/30', 'border-cyan-400');
+                if (statusText) statusText.innerText = `โหมด AR (${currentFacingMode === 'user' ? 'กล้องหน้า' : 'กล้องหลัง'})`;
+            } catch (err) {
+                alert('ไม่สามารถเปิดใช้งานกล้องได้ โปรดอนุญาตสิทธิ์การเข้าถึงกล้องในเบราว์เซอร์');
+                console.error('Camera access error:', err);
+            }
+        }
+
+        async function toggleARCamera() {
+            const videoEl = document.getElementById('camera-feed');
+            const arBtn = document.getElementById('ar-toggle-btn');
+            const statusText = document.getElementById('ar-status-text');
+
+            if (!isARActive) {
+                await startCameraStream();
+            } else {
+                if (videoStream) {
+                    videoStream.getTracks().forEach(track => track.stop());
+                }
+                videoEl.style.display = 'none';
+                isARActive = false;
+
+                if (renderer) renderer.setClearColor(0x090d16, 1);
+                arBtn.classList.remove('bg-cyan-500/30', 'border-cyan-400');
+                if (statusText) statusText.innerText = 'โหมด 3D สตูดิโอปกติ';
+            }
+        }
+
+        async function flipCamera() {
+            currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+            if (isARActive) {
+                await startCameraStream();
+            } else {
+                await toggleARCamera();
+            }
+        }
+
+        function onWindowResize() {
+            if (!renderer || players.length === 0) return;
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            players.forEach((p) => {
+                const aspect = (window.innerWidth / (isVersusMode ? 2 : 1)) / window.innerHeight;
+                const d = 5;
+                p.camera.left = -d * aspect;
+                p.camera.right = d * aspect;
+                p.camera.top = d;
+                p.camera.bottom = -d;
+                p.camera.updateProjectionMatrix();
+            });
+        }
+
+        window.onload = () => {
+            initThreeRenderer();
+            setupPlayers();
+            animate();
+
+            document.getElementById('high-score-display').innerText = highScore;
+
+            // UI Listeners
+            document.getElementById('start-btn').addEventListener('click', () => startGame(false));
+            document.getElementById('start-2p-btn').addEventListener('click', () => startGame(true));
+            document.getElementById('restart-btn').addEventListener('click', () => startGame(isVersusMode));
+            document.getElementById('home-btn').addEventListener('click', returnToHome);
+            document.getElementById('home-gameover-btn').addEventListener('click', returnToHome);
+            document.getElementById('enable-ar-btn').addEventListener('click', toggleARCamera);
+            document.getElementById('ar-toggle-btn').addEventListener('click', toggleARCamera);
+            document.getElementById('flip-cam-btn').addEventListener('click', flipCamera);
+
+            document.getElementById('hand-toggle-btn').addEventListener('click', toggleHandTracking);
+            document.getElementById('start-hand-btn').addEventListener('click', () => {
+                toggleHandTracking();
+                startGame(false);
+            });
+
+            // Mute Toggle
+            document.getElementById('sound-btn').addEventListener('click', () => {
+                audio.muted = !audio.muted;
+                const icon = document.getElementById('sound-icon');
+                if (audio.muted) {
+                    icon.className = 'fa-solid fa-volume-xmark text-slate-400';
+                } else {
+                    icon.className = 'fa-solid fa-volume-high text-white';
+                }
+            });
+
+            // Keyboard Controls (P1: Space/A, P2: Enter/L)
+            window.addEventListener('keydown', (e) => {
+                if (gameMode !== 'PLAYING') return;
+                if (e.code === 'Space' || e.code === 'KeyA') {
+                    placeBlock(0);
+                } else if (e.code === 'Enter' || e.code === 'KeyL') {
+                    if (isVersusMode) placeBlock(1);
+                }
+            });
+
+            // Touch / Click Input Listener
+            window.addEventListener('pointerdown', (e) => {
+                if (e.target.closest('button') || e.target.closest('#start-screen') || e.target.closest('#gameover-screen')) {
+                    return;
+                }
+                if (gameMode === 'PLAYING') {
+                    if (!isVersusMode) {
+                        placeBlock(0);
+                    } else {
+                        // Split screen touch routing
+                        if (e.clientX < window.innerWidth / 2) {
+                            placeBlock(0); // Left half = Player 1
+                        } else {
+                            placeBlock(1); // Right half = Player 2
+                        }
+                    }
+                }
+            });
+        };
+    </script>
+</body>
+</html>
